@@ -1,11 +1,10 @@
-import joblib
-import librosa
+import joblib, os
+
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-import os
-import sys
-from extract import extract_features
+
+from ai.features import extract_features
 
 AI_DATA = "./data/ai/"
 HUMAN_DATA = "./data/human/"
@@ -55,11 +54,11 @@ def train_model():
 
     # Save trained model + scaler
     os.makedirs("model", exist_ok=True)
-    joblib.dump(model, "./model/model.pkl")
-    joblib.dump(scaler, "./model/scaler.pkl")
+    joblib.dump(model, "./pickle_storage/model.pkl")
+    joblib.dump(scaler, "./pickle_storage/scaler.pkl")
     
 
-    print("Training complete. Files saved in /model/")
+    print("Training complete. Files saved in /pickle_storage/")
 
 
     train_score = model.score(X_scaled, y_labels)

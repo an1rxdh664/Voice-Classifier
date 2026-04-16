@@ -1,74 +1,26 @@
-from fastapi import FastAPI, UploadFile, File, Body, HTTPException, Depends, Header, Request
-from fastapi.responses import JSONResponse
-import numpy as np
-import os
-import tempfile
-import sys
-import uvicorn
-import requests
-import base64
-from typing import Optional
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from dotenv import load_dotenv
-from predict_utils import predict_from_file, model, scaler
-from base64 import b64decode
 
-# Env variables
+import uvicorn, os
+
+from utils.predict import predict_from_file, load_model_and_scaler
+from utils.audio_parser import get_audio_from_request, error_response
+from utils.security import verify_api_key
+from core import get_request_body
+
 load_dotenv()
 
-
-# Create FastAPI app
 app = FastAPI(
-    title="AI Voice Detection API",
-    description="Detects if a voice is AI-generated or human",
-    version="1.0"
+    title = "AI Voice Classifier",
+    description = "",
+    version = "1.0"
 )
-
-async def verify_api_key(x_api_key: str = Header(None)):
-    valid_key = os.getenv("API_KEY")
-    if not valid_key:
-        raise HTTPException(status_code=500, detail="API_KEY not configured")
-    if x_api_key != valid_key:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    return True
-
-# Request Body Model :
-class AudioRequest(BaseModel):
-    language: Optional[str] = None
-    audioFormat: Optional[str] = None
-    audioBase64: Optional[str] = None
-    audio_url: Optional[str] = None  # keep old field to avoid breaking existing tests
-
-
-# Unified Error Responses :
-def error_response(message, details=None, code=400):
-    payload = {
-        "status": "error",
-        "message": message
-    }
-    if details:
-        payload["details"] = details
-    return JSONResponse(status_code=code, content=payload)
 
 
 @app.get("/")
-def read_root():
-    """Welcome endpoint with available routes"""
-    return {
-        "message": "Welcome to AI Voice Detection API",
-        "endpoints": {
-            "predict": "/predict",
-            "info": "/info",
-            "docs": "/docs"
-        }
-    }
-
-
-@app.get("/info")
 def info():
-    """API Information and feature details"""
     return {
-        "name": "AI Voice Detection API",
+        "name": "API Based AI Voice Classifier",
         "version": "1.0",
         "description": "Detects if a voice is AI-generated or human",
         "features": {
@@ -79,72 +31,37 @@ def info():
             "Pitch": ["Mean", "Std Dev", "Variance", "Mean Difference"]
         },
         "total_features": 20,
-        "model": "Random Forest Classifier (50 trees)"
+        "model": "Random Forest Classifier (50 trees)",
+        "endpoints": {
+            "predict": "/predict",
+            "upload": "/upload",
+            "health": "/health",
+            "docs": "/docs"
+        }
     }
+
 
 @app.get("/health")
 def health():
+    model_ready = True
+    scaler_ready = True
+    try:
+        load_model_and_scaler()
+    except Exception:
+        model_ready = False
+        scaler_ready = False
+
     return {
         "status": "ok",
-        "model_loaded": model is not None,
-        "scaler_loaded": scaler is not None
+        "model_loaded": model_ready,
+        "scaler_loaded": scaler_ready
     }
 
-# Unified Audio Extractor :
-async def get_audio_from_request(request: Request, file: UploadFile = None):
-    body = {}
 
-    try:
-        body = await request.json()
-    except:
-        pass
-
-    # If base64 audio
-    if "audioBase64" in body:
-        audio_b64 = body["audioBase64"]
-        file_ext = body.get("audioformat", "mp3").strip(".")
-        try:
-            audio_bytes = base64.b64decode(audio_b64)
-        except Exception as e:
-            return None, error_response("Invalid base64 audio", str(e), 400)
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}")
-        tmp.write(audio_bytes)
-        tmp.close()
-        return tmp.name, None
-
-    # If audio url
-    if "audio_url" in body:
-        url = body["audio_url"]
-        try:
-            res = requests.get(url)
-            res.raise_for_status()
-        except Exception as e:
-            return None, error_response("Failed to download audio from the url", str(e), 400)
-
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        tmp.write(res.content)
-        tmp.close()
-        return tmp.name, None
-    
-    # Multipart file upload
-    if file:
-        try:
-            contents = await file.read()
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1])
-            tmp.write(contents)
-            tmp.close()
-            return tmp.name, None
-        except Exception as e:
-            return None, error_response("Failed to process uploaded file", str(e), 400)
-        
-    return None, error_response("No audioBase64, audio_url or file provided", code=400)
-
-
-@app.post("/api/voice-detection")
+@app.post("/predict")
 async def predict(request: Request, _verify: bool = Depends(verify_api_key)):
-    request_json = await request.json()
-    temp_path, err = await get_audio_from_request(request)
+    body = await get_request_body(request)
+    temp_path, err = await get_audio_from_request(body)
 
     if err:
         return err
@@ -157,7 +74,7 @@ async def predict(request: Request, _verify: bool = Depends(verify_api_key)):
 
         return {
             "status": "success",
-            "language": request_json["language"] or "Unknown",
+            "language": body.get("language", "Unknown"),
             "classification": classification,
             "confidenceScore": confidence,
             "explanation": f"Model confidence: {confidence * 100:.2f}%"
@@ -176,13 +93,14 @@ async def predict(request: Request, _verify: bool = Depends(verify_api_key)):
                 pass
 
 
-@app.post("/api/upload")
+@app.post("/upload")
 async def predict_upload(
     request: Request,
     file: UploadFile = File(...),
     _verify: bool = Depends(verify_api_key)
 ):
-    temp_path, err = await get_audio_from_request(request, file)
+    body = await get_request_body(request)
+    temp_path, err = await get_audio_from_request(body, file)
 
     if err:
         return err
