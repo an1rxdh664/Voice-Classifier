@@ -2,6 +2,9 @@ import librosa
 import numpy as np
 import sys
 
+def safe_mean_diff(x):
+    return float(np.mean(np.diff(x))) if x.size > 1 else 0.0
+
 def extract_features(file_path):
     try:
         # Load audio file
@@ -17,7 +20,7 @@ def extract_features(file_path):
             float(np.mean(mfcc)),
             float(np.std(mfcc)),
             float(np.var(mfcc)),
-            float(np.mean(np.diff(mfcc)))
+            safe_mean_diff(mfcc)
         ]
 
         # ZCR - Mean, Std, Var, Mean Difference
@@ -26,7 +29,7 @@ def extract_features(file_path):
             float(np.mean(zcr)), 
             float(np.std(zcr)),
             float(np.var(zcr)),
-            float(np.mean(np.diff(zcr)))
+            safe_mean_diff(zcr)
         ]
 
         # Spectral Centroid - Mean, Std, Var, Mean Difference
@@ -35,7 +38,7 @@ def extract_features(file_path):
             float(np.mean(centroid)), 
             float(np.std(centroid)),
             float(np.var(centroid)),
-            float(np.mean(np.diff(centroid)))
+            safe_mean_diff(centroid)
         ]
 
         # RMS - Mean, Std, Var, Mean Difference
@@ -44,19 +47,19 @@ def extract_features(file_path):
             float(np.mean(rms)), 
             float(np.std(rms)),
             float(np.var(rms)),
-            float(np.mean(np.diff(rms)))
+            safe_mean_diff(rms)
         ]
 
         # Pitch (pYIN) - Mean, Std, Var, Mean Difference
         try:
             f0, voiced_flag, _ = librosa.pyin(y, fmin=50, fmax=300, sr=sr)
             pitch = f0[voiced_flag]
-            if len(pitch) > 0:
+            if len(pitch) > 1:
                 pitch_feat = [
                     float(np.mean(pitch)), 
                     float(np.std(pitch)), 
                     float(np.var(pitch)),
-                    float(np.mean(np.diff(pitch)))
+                    safe_mean_diff(pitch)
                 ]
             else:
                 pitch_feat = [0.0, 0.0, 0.0, 0.0]
